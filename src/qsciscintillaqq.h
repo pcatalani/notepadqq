@@ -30,66 +30,86 @@
 #define ScintillaStringData(s)      (s).constData()
 #define ScintillaStringLength(s)    (s).size()
 
+class QTabWidgetqq;
+
 class QsciScintillaqq : public QsciScintilla
 {
     Q_OBJECT
     Q_PROPERTY(QString _fileName READ fileName WRITE setFileName)
-    Q_PROPERTY(bool _fileWatchEnabled READ fileWatchEnabled WRITE setFileWatchEnabled)
-    Q_PROPERTY(bool _ignoreNextSignal READ ignoreNextSignal WRITE setIgnoreNextSignal)
 
 public:
     ~QsciScintillaqq();
     explicit QsciScintillaqq(QWidget *parent = 0);
-    QString encoding;
-    bool BOM;
-    struct Sci_CharacterRange {
+
+    struct CharacterRange {
         long cpMin;
         long cpMax;
     };
+
     struct Sci_TextRange {
-        struct Sci_CharacterRange chrg;
+        struct CharacterRange chrg;
         char *lpstrText;
     };
+
     struct Sci_TextToFind {
-        struct Sci_CharacterRange chrg;     // range to search
+        struct CharacterRange chrg;     // range to search
         char *lpstrText;                // the search pattern (zero terminated)
-        struct Sci_CharacterRange chrgText; // returned as position of matching text
+        struct CharacterRange chrgText; // returned as position of matching text
     };
+
+    int            getTabIndex();
+    bool           isNewEmptyDocument();
+    void           autoSyntaxHighlight();
+    void           forceUIUpdate();
+    void           safeCopy();
+
+
+    void           scrollCursorToCenter(int pos);
+    CharacterRange getSelectionRange();
+
+    QString       fileName();
+    QString       encoding();
+    QString       forcedLanguage();
+    QTabWidgetqq* tabWidget();
+    bool          BOM();
+
+    int                             getSelectedTextCount();
+
+    void          setFileName(QString filename);
+    void          setEncoding(QString enc="UTF-8");
+    void          setForcedLanguage(QString language);
+    void          setBOM(bool yes=true);
 
 private:
     typedef QByteArray ScintillaString;
-    QFileSystemWatcher *fswatch;
     QString _fileName;
-    bool _fileWatchEnabled;
-    bool _ignoreNextSignal;
-    void keyPressEvent(QKeyEvent *e);
-    void keyReleaseEvent(QKeyEvent *e);
-    int oldSelectionLineFrom, oldSelectionIndexFrom, oldSelectionLineTo, oldSelectionIndexTo;
-    bool isCtrlPressed;
-    void initialize();
+    QString _encoding;
+    QString _forcedLanguage;
+    bool    _BOM;
+
+    int     oldSelectionLineFrom, oldSelectionIndexFrom, oldSelectionLineTo, oldSelectionIndexTo;
+
+    void    keyPressEvent(QKeyEvent *e);
+    void    keyReleaseEvent(QKeyEvent *e);
+    void    initialize();
+
+    void    applyGlobalStyles();
+
 private slots:
-    void internFileChanged(const QString &path);
-    void wheelEvent(QWheelEvent * e);
+    void    wheelEvent(QWheelEvent * e);
+
 signals:
-    void fileChanged(const QString &path, QsciScintillaqq* sender);
-    void keyPressed(QKeyEvent *e);
-    void keyReleased(QKeyEvent *e);
-    void updateUI();
+    void    keyPressed(QKeyEvent *e);
+    void    keyReleased(QKeyEvent *e);
+    void    updateUI();
+    void    overtypeChanged(bool yes);
+
 public slots:
-    void setFileName(QString filename);
-    void setFileWatchEnabled(bool enable);
-    bool fileWatchEnabled();
-    void setIgnoreNextSignal(bool ignore=true);
-    bool ignoreNextSignal();
-    QString fileName();
-    bool overType();
-    bool write(QIODevice *io);
-    bool read(QIODevice *io);
-    bool read(QIODevice *io, QString readEncodedAs);
-    void handleUpdateUI_All();
-    bool highlightTextRecurrence(int searchFlags, QString text, long searchFrom, long searchTo, int selector);
+    void                   updateLineMargin();
+    bool                   overType();
+    bool                   highlightTextRecurrence(int searchFlags, QString text, long searchFrom, long searchTo, int selector);
     QsciScintilla::EolMode guessEolMode();
-    ScintillaString convertTextQ2S(const QString &q) const;
+    ScintillaString        convertTextQ2S(const QString &q) const;
 };
 
 #endif // QSCISCINTILLAQQ_H

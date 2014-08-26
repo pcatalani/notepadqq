@@ -30,19 +30,33 @@
 #include <QtNetwork/QLocalSocket>
 #include <QDesktopWidget>
 #include "constants.h"
+#include "generalfunctions.h"
 
 // package libgtk3.0-0
 // required for build: libgtk3.0-dev
 
 void processOtherInstances();
+int numberOfFilesInArgs(QStringList arguments);
+void setupSystemIconTheme();
+bool shouldStartApp(int argc, char *argv[]);
 
 int main(int argc, char *argv[])
-{
-    QApplication a(argc, argv);
+{ 
+    if (!shouldStartApp(argc, argv)) {
+      return 0;
+    }
+    
+    QApplication a(argc, argv);  
     a.processEvents();
-
-#if SINGLEINSTANCE_EXPERIMENTAL
-    processOtherInstances();
+    
+#if defined(SINGLEINSTANCE_EXPERIMENTAL)
+    /* Attach to an existing instance
+     * only if there is at least
+     * one file in the arguments.
+     */
+    if(numberOfFilesInArgs(QApplication::arguments()) > 0) {
+        processOtherInstances();
+    }
 #endif
 
     // Load current locale
@@ -62,17 +76,26 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("notepadqq");
     QCoreApplication::setOrganizationDomain("http://notepadqq.sourceforge.net/");
     QCoreApplication::setApplicationName("Notepadqq");
-    QCoreApplication::setAttribute(Qt::AA_DontShowIconsInMenus, true);
+    //QCoreApplication::setAttribute(Qt::AA_DontShowIconsInMenus, true);
     QCoreApplication::setAttribute(Qt::AA_NativeWindows, true);
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeMenuBar, false);
 
-    MainWindow w;
-    w.showMaximized();
+    // ON SOME SYSTEM ICON THEME IS NOT DETECTED BY QT
+    setupSystemIconTheme();
+
+    MainWindow* w = MainWindow::instance();
+    // 2-STEP initializer
+    w->init();
+    w->showMaximized();
 
     //gdk_notify_startup_complete();
 
     return a.exec();
 }
 
+int numberOfFilesInArgs(QStringList arguments) {
+    return arguments.count() - 1;
+}
 
 void processOtherInstances()
 {
@@ -134,4 +157,68 @@ void processOtherInstances()
             app_socket->disconnectFromServer();
         }
     //}
+}
+
+void setupSystemIconTheme()
+{
+    // SET SYSTEM AND USER ICON THEME PATH
+    // THIS SHOULD BE OK ON MOST LINUX SYSTEMS
+    QStringList icon_theme_paths;
+    icon_theme_paths << QDir::home().absoluteFilePath(".icons/");
+    icon_theme_paths << QString("/usr/local/share/icons");
+    icon_theme_paths << QString("/usr/share/icons");
+    icon_theme_paths << QString("%1/../share/icons").arg(qApp->applicationDirPath());
+    QIcon::setThemeSearchPaths(icon_theme_paths);
+
+    // USE DCONF TO GET THE CURRENT THEME NAME
+    // THIS SHOULD WORK ON MODERN GNOME SYSTEMS
+    QString icon_theme_name = generalFunctions::readDConfKey("org.gnome.desktop.interface", "icon-theme");
+    qDebug() << "detected " << icon_theme_name << " icon theme";
+    if ( !icon_theme_name.isNull() && !icon_theme_name.isEmpty() ) {
+
+        QIcon::setThemeName(icon_theme_name);
+    }
+}
+
+void displayHelp()
+{
+    printf("\n"
+           "notepadqq    a Notepad++ clone\n\n"
+           "Text editor with support for multiple programming languages,\n"
+           "multiple encodings and plugin support.\n\n"
+           "Usage:\n"
+           "  notepadqq\n"
+           "  notepadqq [-h|--help]\n"
+           "  notepadqq [-v|--version]\n"
+           "  notepadqq [file1 file2 ...]\n\n"
+          );
+}
+
+void displayVersion()
+{
+    printf(POINTVERSION "\n");
+}
+
+inline
+bool shouldStartApp(int argc, char* argv[])
+{
+#define MATCHES_OPT(str, short, long) \
+    strcmp(str, short)==0 || strcmp(str, long)==0
+    
+    if (argc > 1) {
+        const char* const firstArg = argv[1];
+        if (MATCHES_OPT(firstArg, "-h", "--help")) {
+          displayHelp();
+          return false;
+        }
+        
+        if (MATCHES_OPT(firstArg, "-v", "--version")) {
+          displayVersion();
+          return false;
+        }
+        
+    }
+    return true;
+    
+#undef MATCHES_OPT
 }

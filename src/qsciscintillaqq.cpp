@@ -19,36 +19,42 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
  */
-
+#include "mainwindow.h"
 #include "qsciscintillaqq.h"
+#include "qtabwidgetqq.h"
 #include "constants.h"
+#include "generalfunctions.h"
 #include <QFileSystemWatcher>
 #include <QKeyEvent>
 #include <QIODevice>
 #include <QTextCodec>
 #include <QTextStream>
 #include <Qsci/qsciscintillabase.h>
+#include <QtXml/qdom.h>
+#include <QHash>
+#include <QMessageBox>
+#include <QApplication>
+#include <QClipboard>
+#include <QChar>
+
+#include "userlexer.h"
 
 QsciScintillaqq::QsciScintillaqq(QWidget *parent) :
     QsciScintilla(parent)
 {
+    _encoding   = "UTF-8";
+    _BOM        = false;
+    _forcedLanguage = "";
+    _fileName   = "";
 
-    _fileWatchEnabled = true;
-    encoding = "UTF-8";
-    BOM = false;
-    this->setFileName("");
-    fswatch = new QFileSystemWatcher(parent);
-    isCtrlPressed = false;
-    setIgnoreNextSignal(false);
-    connect(fswatch, SIGNAL(fileChanged(QString)), SLOT(internFileChanged(QString)));
-    connect(this,SIGNAL(SCN_UPDATEUI()), SLOT(handleUpdateUI_All()));
+    connect(this, SIGNAL(SCN_UPDATEUI(int)), this, SIGNAL(updateUI()));
+    connect(this, SIGNAL(linesChanged()), this, SLOT(updateLineMargin()) );
 
     this->initialize();
 }
 
 QsciScintillaqq::~QsciScintillaqq()
 {
-    delete fswatch;
 }
 
 QString QsciScintillaqq::fileName()
@@ -59,142 +65,121 @@ QString QsciScintillaqq::fileName()
 void QsciScintillaqq::setFileName(QString filename)
 {
     _fileName = filename;
-    fswatch->removePath(fileName());
-    if(filename != "")
-        fswatch->addPath(filename);
 }
 
-void QsciScintillaqq::setFileWatchEnabled(bool enable)
+QString QsciScintillaqq::encoding()
 {
-    _fileWatchEnabled = enable;
+    return _encoding;
 }
 
-void QsciScintillaqq::setIgnoreNextSignal(bool ignore)
+void QsciScintillaqq::setEncoding(QString enc)
 {
-    _ignoreNextSignal = ignore;
+    _encoding = enc;
 }
 
-bool QsciScintillaqq::ignoreNextSignal()
+bool QsciScintillaqq::BOM()
 {
-    return _ignoreNextSignal;
+    return _BOM;
 }
 
-bool QsciScintillaqq::fileWatchEnabled()
+void QsciScintillaqq::setBOM(bool yes)
 {
-    return _fileWatchEnabled;
+    _BOM = yes;
 }
 
-void QsciScintillaqq::internFileChanged(const QString &path)
+//Get the number of characters in the current selection.
+int QsciScintillaqq::getSelectedTextCount()
 {
-    if(fileWatchEnabled())
-    {
-        if(ignoreNextSignal()) {
-            setIgnoreNextSignal(false);
-        } else {
-            emit fileChanged(path, this);
-        }
-    }
-    // Starts the filesystemwatcher again
-    setFileName(this->fileName());
+    CharacterRange range = getSelectionRange();
+    return (range.cpMax - range.cpMin);
+}
+
+void QsciScintillaqq::scrollCursorToCenter(int pos)
+{
+    SendScintilla(SCI_GOTOPOS,pos);
+    int line                     = SendScintilla(SCI_LINEFROMPOSITION,pos);
+    int firstVisibleDisplayLine  = SendScintilla(SCI_GETFIRSTVISIBLELINE);
+    int firstVisibleDocumentLine = SendScintilla(SCI_DOCLINEFROMVISIBLE, firstVisibleDisplayLine);
+    int nbLine                   = SendScintilla(SCI_LINESONSCREEN, firstVisibleDisplayLine);
+    int lastVisibleDocumentLine  = SendScintilla(SCI_DOCLINEFROMVISIBLE, firstVisibleDisplayLine + nbLine);
+
+    int middleLine;
+    if( line - firstVisibleDocumentLine < lastVisibleDocumentLine - line)
+        middleLine = firstVisibleDocumentLine + nbLine/2;
+    else
+        middleLine = lastVisibleDocumentLine - nbLine/2;
+
+    int nbLinesToScroll = line - middleLine;
+    scroll(0,nbLinesToScroll);
 }
 
 QsciScintilla::EolMode QsciScintillaqq::guessEolMode()
 {
-    QString a = this->text();
-    int _win = a.count(QRegExp("\r\n"));
-    int _mac = a.count(QRegExp("\r"));
-    int _unix= a.count(QRegExp("\n"));
+    int             _docLength = this->length();
+    char*           _docBuffer = (char*)this->SendScintilla(QsciScintilla::SCI_GETCHARACTERPOINTER);
+    QTextCodec*     codec      = QTextCodec::codecForName(this->encoding().toUtf8());
+    QByteArray      a          = codec->fromUnicode(QString::fromUtf8(_docBuffer,_docLength));
 
-    if(_win >= _mac && _win >= _unix)
-    {
-        return QsciScintilla::EolWindows;
-    } else if(_mac > _win && _mac > _unix) {
-        return QsciScintilla::EolMac;
-    } else if(_unix > _win && _unix > _unix) {
-        return QsciScintilla::EolUnix;
+    int _win = a.count("\r\n");
+    int _mac = a.count('\r');
+    int _unix= a.count('\n');
+
+    if( (_win+_mac+_unix) == 0) {
+        return static_cast<QsciScintilla::EolMode>(-1);
     }
+    if(_win >= _mac && _win >= _unix)
+        return QsciScintilla::EolWindows;
+    else if(_mac > _win && _mac > _unix)
+        return QsciScintilla::EolMac;
+    else if(_unix > _win && _unix > _mac)
+        return QsciScintilla::EolUnix;
     return QsciScintilla::EolUnix;
 }
 
 bool QsciScintillaqq::overType()
 {
     int ovr = SendScintilla(QsciScintillaBase::SCI_GETOVERTYPE);
-    if(ovr == 1)
-        return true;
-    else
-        return false;
+    return (ovr==1);
+}
+
+void QsciScintillaqq::safeCopy()
+{
+    const int contentLength = this->getSelectedTextCount();
+    char*     stringData    = new char[contentLength+1];
+
+    this->SendScintilla(SCI_GETSELTEXT,0,(void*)stringData);
+    for(int i=0;i<contentLength;i++) {
+        if(stringData[i] == '\0')
+            stringData[i] = ' ';
+    }
+    stringData[contentLength] = '\0';
+    QApplication::clipboard()->setText(stringData);
+    delete [] stringData;
 }
 
 void QsciScintillaqq::keyPressEvent(QKeyEvent *e)
 {
-    if(e->key() == Qt::Key_Control) {
-         isCtrlPressed = true;
-    }
-
     emit keyPressed(e);
     QsciScintilla::keyPressEvent(e);
 }
 
 void QsciScintillaqq::keyReleaseEvent(QKeyEvent *e)
 {
-    if(e->key() == Qt::Key_Control) {
-         isCtrlPressed = false;
+    if(e->modifiers() & Qt::ControlModifier) {
+        switch(e->key()) {
+        case Qt::Key_C:
+            safeCopy();
+            break;
+        }
+    }else {
+        switch(e->key())
+        {
+        case Qt::Key_Insert:
+            emit overtypeChanged(overType());
+        }
     }
-
     emit keyReleased(e);
     QsciScintilla::keyReleaseEvent(e);
-}
-
-bool QsciScintillaqq::write(QIODevice *io)
-{
-    if(!io->open(QIODevice::WriteOnly))
-        return false;
-
-    QTextCodec *codec = QTextCodec::codecForName(encoding.toUtf8());
-    QString textToSave = this->text();
-    if(BOM)
-    {
-        textToSave = QChar(QChar::ByteOrderMark) + textToSave;
-    }
-    QByteArray string = codec->fromUnicode(textToSave);
-
-    if(io->write(string) == -1)
-        return false;
-    io->close();
-
-    return true;
-}
-
-bool QsciScintillaqq::read(QIODevice *io)
-{
-    return this->read(io, "UTF-8");
-}
-
-bool QsciScintillaqq::read(QIODevice *io, QString readEncodedAs)
-{
-    if(!io->open(QIODevice::ReadOnly))
-        return false;
-
-    QTextStream stream ( io );
-    QString txt;
-
-    // stream.setCodec("Windows-1252");
-    stream.setCodec(readEncodedAs.toUtf8());
-    // stream.setCodec("UTF-16BE");
-    // stream.setCodec("UTF-16LE");
-
-
-    txt = stream.readAll();
-    io->close();
-
-    this->setText(txt);
-
-    return true;
-}
-
-void QsciScintillaqq::handleUpdateUI_All()
-{
-     emit updateUI();
 }
 
 bool QsciScintillaqq::highlightTextRecurrence(int searchFlags, QString text, long searchFrom, long searchTo, int selector)
@@ -204,7 +189,7 @@ bool QsciScintillaqq::highlightTextRecurrence(int searchFlags, QString text, lon
     if (searchFrom == searchTo)
         return false;
 
-    while(1)
+    while(searchFrom < searchTo)
     {
         SendScintilla(SCI_SETSEARCHFLAGS, searchFlags);
         SendScintilla(SCI_SETTARGETSTART, searchFrom);
@@ -215,7 +200,6 @@ bool QsciScintillaqq::highlightTextRecurrence(int searchFlags, QString text, lon
             return false;
         }
 
-
         // It was found.
         long targstart = SendScintilla(SCI_GETTARGETSTART);
         long targend = SendScintilla(SCI_GETTARGETEND);
@@ -225,12 +209,9 @@ bool QsciScintillaqq::highlightTextRecurrence(int searchFlags, QString text, lon
                            targstart,
                            targend - targstart);
 
-        searchFrom++;
-
+        searchFrom = targend + 1;
     }
-
     return true;
-
 }
 
 QsciScintillaqq::ScintillaString QsciScintillaqq::convertTextQ2S(const QString &q) const
@@ -243,25 +224,12 @@ QsciScintillaqq::ScintillaString QsciScintillaqq::convertTextQ2S(const QString &
 
 void QsciScintillaqq::wheelEvent(QWheelEvent * e)
 {
-    if(isCtrlPressed)
+    if(e->modifiers() & Qt::ControlModifier)
     {
-        e->accept();
-
-        int d = e->delta() / 120;
-        if(d>0)
-        {
-            while(d > 0)
-            {
-                d -= 120;
-                this->zoomIn();
-            }
-        } else
-        {
-            while(d < 0)
-            {
-                d += 120;
-                this->zoomOut();
-            }
+        if( e->delta() < 0) {
+            MainWindow::instance()->on_actionZoom_Out_triggered();
+        }else if( e->delta() > 0) {
+            MainWindow::instance()->on_actionZoom_In_triggered();
         }
     } else
     {
@@ -274,42 +242,153 @@ void QsciScintillaqq::wheelEvent(QWheelEvent * e)
  */
 void QsciScintillaqq::initialize()
 {
-    // Set font
-    QFont *f = new QFont("Courier New", 10, -1, false);
-    this->setFont(*f);
-    QColor *c = new QColor("#000000"); // DB8B0B
-    this->setColor(*c);
-    this->setCaretForegroundColor(QColor("#5E5E5E"));
 
 
     this->setMarginLineNumbers(1, true);
-    this->setMarginWidth(1, 47);
     this->setFolding(QsciScintillaqq::BoxedTreeFoldStyle);
     this->setAutoIndent(true);
     this->setAutoCompletionThreshold(2);
     this->setUtf8(true);
-    //sci->SendScintilla(QsciScintilla::SCI_SETCODEPAGE, 950);
-    //sci->SendScintilla(QsciScintilla::SCI_SETFOLDFLAGS, QsciScintilla::SC_FOLDFLAG_LINEBEFORE_CONTRACTED + QsciScintilla::SC_FOLDFLAG_LINEAFTER_CONTRACTED);
 
-    /*QsciAPIs apis(&lex);
-    apis.add("test");
-    apis.add("test123");
-    apis.add("foobar");
-    apis.prepare();
-    lex.setAPIs(&apis);*/
-
-    // autoLexer(sci->fileName(), sci); TODO
+    // GLOBALS
+    applyGlobalStyles();
 
     this->setBraceMatching(QsciScintillaqq::SloppyBraceMatch);
     this->setCaretLineVisible(true);
-    this->setCaretLineBackgroundColor(QColor("#E6EBF5"));
-    this->setIndentationGuidesForegroundColor(QColor("#C0C0C0"));
+
+}
+
+
+void QsciScintillaqq::applyGlobalStyles()
+{
+    QFont* system_font = MainWindow::instance()->systemMonospace();
+    qDebug() << "system font: " << system_font->family() << " " << system_font->pointSize();
+    setFont(*system_font);
+
+    ShrPtrStylerDefinition glob_style = MainWindow::instance()->getLexerFactory()->getGlobalStyler();
+    ShrPtrWordsStyle       def_style  = glob_style->words_stylers_by_name.value(stylename::DEFAULT);
+    this->setColor(def_style->fg_color);
+    this->setPaper(def_style->bg_color);
+
+    ShrPtrWordsStyle caret_style       = glob_style->words_stylers_by_name.value(stylename::CARET);
+    ShrPtrWordsStyle indent_style      = glob_style->words_stylers_by_name.value(stylename::INDENT_GUIDELINE);
+    ShrPtrWordsStyle select_style      = glob_style->words_stylers_by_name.value(stylename::SELECTED_TEXT);
+    ShrPtrWordsStyle fold_margin_style = glob_style->words_stylers_by_name.value(stylename::FOLD_MARGIN);
+    ShrPtrWordsStyle margins_style     = glob_style->words_stylers_by_name.value(stylename::LINE_NUMBER_MARGIN);
+
+    this->setSelectionBackgroundColor(select_style->bg_color);
+    this->setSelectionForegroundColor(select_style->fg_color);
+
+    this->setFoldMarginColors(fold_margin_style->fg_color, fold_margin_style->bg_color);
+    this->setMarginsBackgroundColor(margins_style->bg_color);
+    this->setMarginsForegroundColor(margins_style->fg_color);
+    this->setMarginsFont(QFont(margins_style->font_name,margins_style->font_size));
+    this->setCaretForegroundColor(caret_style->fg_color);
+    this->setCaretLineBackgroundColor(indent_style->fg_color);
+
+    this->setIndentationGuidesForegroundColor(indent_style->fg_color);
+
+    this->SendScintilla(QsciScintilla::SCI_INDICSETFORE, SELECTOR_DefaultSelectionHighlight, indent_style->fg_color.value());
 
     this->SendScintilla(QsciScintilla::SCI_INDICSETSTYLE, SELECTOR_DefaultSelectionHighlight, QsciScintilla::INDIC_ROUNDBOX);
-    this->SendScintilla(QsciScintilla::SCI_INDICSETFORE, SELECTOR_DefaultSelectionHighlight, 0x00FF24);
     this->SendScintilla(QsciScintilla::SCI_INDICSETALPHA, SELECTOR_DefaultSelectionHighlight, 100);
     this->SendScintilla(QsciScintilla::SCI_INDICSETUNDER, SELECTOR_DefaultSelectionHighlight, true);
+    this->SendScintilla(SCI_SETYCARETPOLICY,QsciScintilla::CARET_SLOP);
+}
 
-    delete f;
-    delete c;
+
+int QsciScintillaqq::getTabIndex()
+{
+    QWidget *widget = this->parentWidget();
+    while(widget->objectName() != "singleTabWidget")
+    {
+        widget = widget->parentWidget();
+    }
+
+    QWidget *tabwidget = widget->parentWidget();
+    while(tabwidget->objectName() != "tabWidget")
+    {
+        tabwidget = tabwidget->parentWidget();
+    }
+
+    QTabWidgetqq *tabwidget_cast = static_cast<QTabWidgetqq *>(tabwidget);
+
+    return tabwidget_cast->indexOf(widget);
+}
+
+QTabWidgetqq *QsciScintillaqq::tabWidget()
+{
+    QWidget *tabwidget = this->parentWidget();
+    while(tabwidget->objectName() != "tabWidget")
+    {
+        tabwidget = tabwidget->parentWidget();
+    }
+
+    return static_cast<QTabWidgetqq *>(tabwidget);
+}
+
+/**
+* Detects if the document is a new empty document
+*
+* @return true or false
+*/
+bool QsciScintillaqq::isNewEmptyDocument()
+{
+    if(this->length()==0
+       && this->isModified() == false
+       && this->fileName() == "" ) {
+
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void QsciScintillaqq::forceUIUpdate()
+{
+    emit updateUI();
+}
+
+void QsciScintillaqq::autoSyntaxHighlight()
+{
+    // DELETE THE OLD LEXER
+    if ( lexer() ) lexer()->deleteLater();
+    QsciLexer* lex;
+
+    if(_forcedLanguage.isEmpty()) {
+        QFileInfo info(fileName());
+        lex = MainWindow::instance()->getLexerFactory()->createLexer( info, this);
+    }else {
+        lex = MainWindow::instance()->getLexerFactory()->createLexerByName( _forcedLanguage, this);
+    }
+    if ( lex ) {
+        setLexer(lex);
+    }
+}
+
+QString QsciScintillaqq::forcedLanguage()
+{
+    return _forcedLanguage;
+}
+
+void QsciScintillaqq::setForcedLanguage(QString language)
+{
+    _forcedLanguage = language.toLower();
+    autoSyntaxHighlight();
+
+    //Global styles always take precedence
+    applyGlobalStyles();
+}
+
+//Keeps the line margin readable at all times
+void QsciScintillaqq::updateLineMargin() {
+    setMarginWidth(1,QString("00%1").arg(lines()));
+}
+
+QsciScintillaqq::CharacterRange QsciScintillaqq::getSelectionRange()
+{
+    CharacterRange crange;
+    crange.cpMin = SendScintilla(SCI_GETSELECTIONSTART);
+    crange.cpMax = SendScintilla(SCI_GETSELECTIONEND);
+    return crange;
 }

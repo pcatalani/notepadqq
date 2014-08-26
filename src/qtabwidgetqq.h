@@ -23,7 +23,11 @@
 #ifndef QTABWIDGETQQ_H
 #define QTABWIDGETQQ_H
 
+#include "qsciscintillaqq.h"
+#include "qtabwidgetscontainer.h"
 #include <QTabWidget>
+
+class QTabWidgetsContainer;
 
 class QTabWidgetqq : public QTabWidget
 {
@@ -32,15 +36,19 @@ public:
     explicit QTabWidgetqq(QWidget *parent = 0);
     int getTabIndexAt(const QPoint &pos);
 
-    void addNewDocument();
-signals:
-
-public slots:
-
-private:
-    int _showAllChars;
+    int addNewDocument();
     int addEditorTab(bool setFocus, QString title);
-
+    QsciScintillaqq *focusQSciScintillaqq();
+    QsciScintillaqq *QSciScintillaqqAt(int index);
+    void setTabBarHidden(bool yes);
+    void setTabBarVertical(bool yes);
+    void setTabBarHighlight(bool yes);
+    QTabWidgetsContainer *getTabWidgetsContainer();
+signals:
+    void documentAdded(int index);
+public slots:
+    void on_text_changed();
+    void on_modification_changed(bool m);
 };
 
 #endif // QTABWIDGETQQ_H

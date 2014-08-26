@@ -4,10 +4,16 @@
 *.kate-swp
 *.swp
 .DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.old
 
 notepadqq-build-desktop
 build
 src/notepadqq.pro.user
+src/notepadqq.pro.user.*
 src/Makefile
 docs/html
 packages

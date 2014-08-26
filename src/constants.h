@@ -27,14 +27,16 @@
 #include <QString>
 #include <QDir>
 #include <QProcessEnvironment>
-#include <QCoreApplication>
+#include <QApplication>
+//#include <QCoreApplication>
 
 
 #define SINGLEINSTANCE_EXPERIMENTAL true // When true, enable the experimental function for the "single instance" system
 
 
-const QString VERSION = "0.13.11"; // major.minor.revision
-const QString COPYRIGHT = QObject::trUtf8("Copyright © 2010-2012, the Notepadqq team");
+#define POINTVERSION "0.20.0" // major.minor.revision
+const QString VERSION = POINTVERSION;
+const QString COPYRIGHT = QObject::trUtf8("Copyright © 2010-2014, the Notepadqq team");
 const QString URL = "http://notepadqq.sourceforge.net/";
 
 
@@ -42,9 +44,11 @@ inline QString ApplicationL10nDir() {
 #ifdef Q_OS_WIN1DOWS
     QString def = "NOT IMPLEMENTED";
 #else
-    QString def = "/usr/share/notepadqq/L10n";
+    //QString def = "/usr/share/notepadqq/L10n";
+    QString def = QString("%1/../share/%2/L10n").arg(qApp->applicationDirPath()).arg(qApp->applicationName().toLower());
 #endif
-    if(!QDir(def).exists()) def = QCoreApplication::applicationDirPath() + "/L10n";
+    //if(!QDir(def).exists()) def = QCoreApplication::applicationDirPath() + "/L10n";
+    if(!QDir(def).exists()) def = qApp->applicationDirPath() + "/L10n";
     return def;
 }
 

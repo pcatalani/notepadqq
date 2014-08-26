@@ -5,21 +5,46 @@
 #-------------------------------------------------
 
 QT       += core gui \
-            network
+            network \
+            xml
 
 TARGET = notepadqq
 TEMPLATE = app
 
-DESTDIR = ../build
+RCC_DIR = ../build/build_data
+UI_DIR = ../build/build_data
+MOC_DIR = ../build/build_data
+OBJECTS_DIR = ../build/build_data
+
+isEmpty(DESTDIR) {
+    CONFIG(debug, debug|release) {
+        DESTDIR = ../build/debug
+    }
+    CONFIG(release, debug|release) {
+        DESTDIR = ../build/release
+    }
+}
+
+win32 {
+    DEFINES += QSCINTILLA_DLL
+    LIBS += User32.lib
+}
 
 
 SOURCES += main.cpp\
-        mainwindow.cpp \
+    mainwindow.cpp \
     qsciscintillaqq.cpp \
     frmabout.cpp \
     userlexer.cpp \
     qtabwidgetqq.cpp \
-    generalfunctions.cpp
+    generalfunctions.cpp \
+    qtabwidgetscontainer.cpp \
+    frmsrchreplace.cpp \
+    searchengine.cpp \
+    docengine.cpp \
+    appwidesettings.cpp \
+    lexerfactory.cpp \
+    frmpreferences.cpp
 
 HEADERS  += mainwindow.h \
     qsciscintillaqq.h \
@@ -27,39 +52,53 @@ HEADERS  += mainwindow.h \
     constants.h \
     userlexer.h \
     qtabwidgetqq.h \
-    generalfunctions.h
+    generalfunctions.h \
+    qtabwidgetscontainer.h \
+    frmsrchreplace.h \
+    searchengine.h \
+    docengine.h \
+    appwidesettings.h \
+    lexerfactory.h \
+    frmpreferences.h
 
 FORMS    += mainwindow.ui \
-    frmabout.ui
+    frmabout.ui \
+    frmsrchreplace.ui \
+    frmpreferences.ui
 
 LIBS += -lqscintilla2
 
 OTHER_FILES += \
     qscintilla/include/Scintilla.iface \
     qscintilla/include/HFacer.py \
-    qscintilla/include/Face.py
+    qscintilla/include/Face.py \
+    syntax/stylers.xml \
+    syntax/langs.xml
 
 RESOURCES += \
     resources.qrc
 
 TRANSLATIONS += L10n/notepadqq_en.ts \
-                L10n/notepadqq_it.ts \
+                L10n/notepadqq_it.ts
 
 
 unix {
     # MAKE INSTALL
     INSTALLS += target \
-        vfiles
-        #desktop \
-        #icon64
+        share \
+        data
 
-    target.path = /usr/bin/
+    isEmpty(PREFIX) {
+        PREFIX = /usr/local
+    }
+
+    target.path = $$INSTALL_ROOT$$PREFIX/bin/
     target.files += $$DESTDIR/$$TARGET
-
-    vfiles.path = /
-    vfiles.files += sys_files/*
-    #desktop.path = /usr/share/applications/
-    #desktop.files += $$SYS_FILES/usr/share/applications/notepadqq.desktop
-    #icon64.path = $$DATADIR/icons/hicolor/64x64/apps
-    #icon64.files += fsudoku.png
+    share.path = $$INSTALL_ROOT$$PREFIX/share
+    share.files += sys_files/*
+    data.path  = $$INSTALL_ROOT$$PREFIX/share/notepadqq
+    data.files = syntax/*.xml
 }
+
+unix|win32: LIBS += -lmagic
+

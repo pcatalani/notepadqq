@@ -23,7 +23,14 @@
 #include "generalfunctions.h"
 #include <QStringList>
 #include <QProcess>
+#include <QDir>
+#include <QFile>
+#include <QDebug>
+#include <QApplication>
 #include <QTextDecoder>
+#include <QFile>
+#include <QDebug>
+#include <QDesktopServices>
 
 
 generalFunctions::generalFunctions()
@@ -31,40 +38,56 @@ generalFunctions::generalFunctions()
 
 }
 
-QString generalFunctions::getFileMime(QString file)
+QString generalFunctions::getFileMimeType(QString file)
 {
-    // Yeah, we suck at this
-    return getOutputFromFileMimeCmd(file, "--mime-type");
+    return getFileInformation(file, (MAGIC_ERROR|MAGIC_MIME_TYPE));
 }
 
-QString generalFunctions::getFileEncoding(QString file)
+QString generalFunctions::getFileMimeEncoding(QString file)
 {
-    QString enc = getOutputFromFileMimeCmd(file, "--mime-encoding");
-    if(enc != "")
-    {
-        for(int i=0; i<QTextCodec::availableCodecs().count(); i++)
-        {
-            if(QTextCodec::availableCodecs().at(i).toLower() == enc.toLower())
-            {
-                return QTextCodec::availableCodecs().at(i);
+    return getFileInformation(file, (MAGIC_ERROR|MAGIC_MIME_ENCODING));
+}
+
+QString generalFunctions::getFileType(QString file)
+{
+    return getFileInformation(file,(MAGIC_ERROR|MAGIC_RAW));
+}
+
+QString generalFunctions::getFileInformation(QString file, int flags)
+{
+    if((!(QFile(file).exists())) && (file == ""))return "";
+
+    magic_t myt = magic_open(flags);
+    magic_load(myt,NULL);
+    QString finfo = magic_file(myt,file.toStdString().c_str());
+    magic_close(myt);
+
+    //We go a different route for checking encoding
+    if((flags & MAGIC_MIME_ENCODING)) {
+        //Don't ever return a codec we don't support, will cause crashes.
+        foreach(QByteArray codec, QTextCodec::availableCodecs()){
+            if(codec.toUpper() == finfo.toUpper()) {
+                return codec;
             }
         }
-    }
 
-    // Codec not available
-    enc = "UTF-8";
-    return enc;
+        return "UTF-8";
+    }else if((flags & MAGIC_RAW)) {
+        return finfo.section(',',0,0);
+    }else {
+        return finfo;
+    }
 }
 
-QString generalFunctions::getOutputFromFileMimeCmd(QString file, QString mimeArg)
+QString generalFunctions::readDConfKey(QString schema, QString key)
 {
     try {
       QProcess *process = new QProcess();
       QStringList *args = new QStringList();
-      args->append("--brief");
-      args->append(mimeArg);
-      args->append(file);
-      process->start("file", *args);
+      args->append("get");
+      args->append(schema);
+      args->append(key);
+      process->start("gsettings", *args);
       if(process->waitForStarted(2000))
       {
           process->closeWriteChannel();
@@ -78,15 +101,29 @@ QString generalFunctions::getOutputFromFileMimeCmd(QString file, QString mimeArg
           delete decoder;
           delete process;
 
-          result = result.trimmed();
+          result = result.trimmed().mid(1, result.length()-3);
           return result;
-      } else
-      {
+      } else {
           return "";
       }
-
     }
     catch (...) {
        return "";
     }
+}
+
+QString generalFunctions::getUserFilePath(QString relativePath)
+{
+#if defined(_WIN32)
+    QString appData      = QDesktopServices::storageLocation(QDesktopServices::DataLocation);
+    QString userFilePath = QString("%1/%2").arg(appData).arg(relativePath);
+    QString sysFilePath  = QString("%1/%2").arg(qApp->applicationDirPath()).arg(relativePath);
+
+    qDebug() << userFilePath;
+#else
+    QString userFilePath = QString("%1/%2/%3/%4").arg(QDir::homePath()).arg(".config").arg(qApp->applicationName().toLower()).arg(relativePath);
+    QString sysFilePath  = QString("%1/../share/%2/%3").arg(qApp->applicationDirPath()).arg(qApp->applicationName().toLower()).arg(relativePath);
+#endif
+    if ( QFile(userFilePath).exists() ) return userFilePath;
+    return sysFilePath;
 }
